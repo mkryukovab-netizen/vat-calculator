@@ -1,0 +1,105 @@
+pipeline:
+  name: vat-calculator
+  identifier: vatcalculator
+  projectIdentifier: default_project
+  orgIdentifier: default
+  tags: {}
+  properties:
+    ci:
+      codebase:
+        connectorRef: account.account_level_github_connector
+        repoName: vat-calculator-docker
+        build: <+input>
+        sparseCheckout: []
+  stages:
+    - stage:
+        name: validate
+        identifier: validate
+        description: ""
+        type: CI
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: true
+            override: true
+          buildIntelligence:
+            enabled: true
+          infrastructure:
+            type: KubernetesDirect
+            spec:
+              connectorRef: account.marina_build_farm_connector
+              namespace: harness-delegate-ng
+              automountServiceAccountToken: true
+              nodeSelector: {}
+              os: Linux
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: install dependencies
+                  identifier: install_dependencies
+                  spec:
+                    connectorRef: account.accpont_level_dockerhub_connector
+                    image: node:24-alpine
+                    shell: Sh
+                    command: npm i
+              - step:
+                  type: Run
+                  name: test
+                  identifier: test
+                  spec:
+                    connectorRef: account.accpont_level_dockerhub_connector
+                    image: node:24-alpine
+                    shell: Sh
+                    command: CI=true npm test -- --coverage
+              - step:
+                  type: Sonarqube
+                  name: Sonarqube scan
+                  identifier: Sonarqube_scan
+                  spec:
+                    mode: orchestration
+                    config: default
+                    target:
+                      type: repository
+                      detection: auto
+                    advanced:
+                      log:
+                        level: info
+                      fail_on_severity: low
+                    resources:
+                      limits:
+                        memory: 4Gi
+                        cpu: 800m
+                    auth:
+                      access_token: <+secrets.getValue("account.sonarqube_token")>
+                      domain: <+secrets.getValue("account.sonarqube_url")>
+                      ssl: true
+                    tool:
+                      exclude: "**/node_modules/**,**/coverage/**"
+                      project_key: vat-calculator
+    - stage:
+        name: Containerise
+        identifier: Containerise
+        description: ""
+        type: CI
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: true
+            override: true
+          buildIntelligence:
+            enabled: true
+          infrastructure:
+            useFromStage: validate
+          execution:
+            steps:
+              - step:
+                  type: BuildAndPushDockerRegistry
+                  name: Build and Push
+                  identifier: Build_and_Push
+                  spec:
+                    connectorRef: account.accpont_level_dockerhub_connector
+                    repo: mkryukova/vat-calc
+                    tags:
+                      - latest
+                      - <+pipeline.sequenceid>
